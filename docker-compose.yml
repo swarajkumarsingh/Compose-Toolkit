@@ -1,0 +1,148 @@
+version: "3.9"
+
+services:
+  # Redis Image
+  redis:
+    container_name: redis-server
+    image: redis:6.2.6
+    hostname: localhost
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-volume:/data
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli ping | grep PONG" ]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+
+  # Prometheus Image
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    restart: on-failure
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "wget", "http://localhost:9090"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 40s 
+
+  # Pgadmin Image
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4
+    hostname: localhost
+    environment:
+      PGADMIN_DEFAULT_EMAIL: pgadmin4@pgadmin.org
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      GUNICORN_ACCESS_LOGFILE: "/dev/null"
+    volumes:
+      - ./pgadmin-servers.json:/pgadmin4/servers.json
+      - ./pgadmin:/var/lib/pgadmin
+    ports:
+      - "3030:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Grafana Image
+  grafana:
+    image: grafana/grafana-enterprise
+    container_name: grafana
+    ports:
+      - 3000:3000
+    restart: on-failure
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Temporal Image
+  temporal:
+    container_name: temporalite
+    image: plutoengineering/temporalite:037b599894440ce0f2692944a035d6bf8deb8076
+    networks:
+    hostname: localhost
+    ports:
+      - 7233:7233
+      - 8233:8233
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Postgres Image
+  postgres:
+    container_name: postgres_container
+    image: postgres:13.5
+    ports:
+      - 5432:5432
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: quiz-game
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PDF-service Image
+  pdfservice: 
+    image: gotenberg/gotenberg:7
+    container_name: kyc_pdfservice
+    restart: on-failure
+
+  # Golang(server) Image
+  golang:
+    container_name: golang_container
+    build:
+      dockerfile: Dockerfile.local
+    ports:
+      - 8080:8080
+    volumes: # rm this line when using Dockerfile
+      - ./:/app
+    restart: on-failure
+    environment:
+      - STAGE=${STAGE}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_USER=${REDIS_USER}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - S3_BUCKET=${S3_BUCKET}
+    depends_on:
+      redis:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+
+volumes:
+  redis: {}
+  grafana-storage: {}
+  db:
+    driver: local
